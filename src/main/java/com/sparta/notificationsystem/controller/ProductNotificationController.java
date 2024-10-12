@@ -3,8 +3,10 @@ package com.sparta.notificationsystem.controller;
 import com.sparta.notificationsystem.service.ProductNotificationService;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,5 +32,13 @@ public class ProductNotificationController {
 
     }
 
+    @GetMapping(value = "/products/notifications/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> streamNotifications() {
+        return productNotificationService.getNotificationStream()
+                .map(message -> ServerSentEvent.<String>builder()
+                        .event("restock-notification")  // 이벤트 타입 설정
+                        .data(message)  // 전송할 메시지 데이터
+                        .build());
+    }
 }
 

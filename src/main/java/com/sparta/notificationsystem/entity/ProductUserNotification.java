@@ -18,4 +18,9 @@ public class ProductUserNotification {
     private Long id;
     private Long productId; // 알림 설정한 상품
     private Long userId;    // 알림 설정한 유저의 아이디
+
+    public ProductUserNotification(Long productId, Long userId) {
+        this.productId = productId;
+        this.userId = userId;
+    }
 }
