@@ -2,7 +2,7 @@ version: '3'
 
 services:
   database:
-    container_name: db
+    container_name: noti_db
     image: mysql:latest
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -24,7 +24,7 @@ services:
           memory: 512M    # 메모리 512MB
 
   application:
-    container_name: app
+    container_name: noti_app
     restart: always
     build:
       dockerfile: Dockerfile
