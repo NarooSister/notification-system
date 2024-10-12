@@ -19,5 +19,7 @@ public class Product {
     private Integer totalRestockRound;  // 총 재입고 회차 수
     private String name;    // 상품 이름
     private Integer stock;  // 재고
-
+    public void incrementRestockRound() {
+        this.totalRestockRound++;
+    }
 }

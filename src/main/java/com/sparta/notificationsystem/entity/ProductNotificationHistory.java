@@ -2,6 +2,7 @@ package com.sparta.notificationsystem.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -9,6 +10,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class ProductNotificationHistory {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,5 +36,27 @@ public class ProductNotificationHistory {
         public String getDescription() {
             return description;
         }
+    }
+
+    public ProductNotificationHistory(Long productId, Integer restockRound, Status status) {
+        this.productId = productId;
+        this.restockRound = restockRound;
+        this.status = status;
+    }
+    // status 상태를 변경하는 메서드들
+    public void markInProgress() {
+        this.status = Status.IN_PROGRESS;
+    }
+
+    public void markCanceledBySoldOut() {
+        this.status = Status.CANCELED_BY_SOLD_OUT;
+    }
+
+    public void markCanceledByError() {
+        this.status = Status.CANCELED_BY_ERROR;
+    }
+
+    public void markCompleted() {
+        this.status = Status.COMPLETED;
     }
 }
