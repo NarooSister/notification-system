@@ -34,8 +34,12 @@ services:
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
       SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${SPRING_REDIS_PASSWORD}  # Redis 비밀번호 설정
     depends_on:
       - database
+      - redis
     networks:
       - local_network
     deploy:
@@ -43,6 +47,23 @@ services:
         limits:
           cpus: '0.50'   # CPU 50%
           memory: 512M    # 메모리 512MB
+
+  redis:
+    container_name: noti_redis
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=${SPRING_REDIS_PASSWORD}
+    command: [ "redis-server", "--requirepass", "${SPRING_REDIS_PASSWORD}"   ]  # Redis 비밀번호 설정
+
+    networks:
+      - local_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'   # CPU 25%
+          memory: 256M    # 메모리 256MB
 
 networks:
   local_network:
