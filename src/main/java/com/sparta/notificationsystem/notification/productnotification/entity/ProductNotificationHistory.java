@@ -1,4 +1,4 @@
-package com.sparta.notificationsystem.entity;
+package com.sparta.notificationsystem.notification.productnotification.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -43,6 +43,11 @@ public class ProductNotificationHistory {
         this.restockRound = restockRound;
         this.status = status;
     }
+
+    public void setLastUserId(Long lastUserId) {
+        this.lastUserId = lastUserId;
+    }
+
     // status 상태를 변경하는 메서드들
     public void markInProgress() {
         this.status = Status.IN_PROGRESS;

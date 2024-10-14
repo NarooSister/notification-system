@@ -1,4 +1,5 @@
-package com.sparta.notificationsystem.config;
+package com.sparta.notificationsystem.global.config;
+
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
@@ -33,12 +34,20 @@ public class RedisConfig {
         return new LettuceConnectionFactory(redisStandaloneConfiguration);
     }
 
+//    @Bean
+//    public RedisTemplate<String, Object> redisTemplate() {
+//        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
+//        redisTemplate.setConnectionFactory(redisConnectionFactory());
+//        redisTemplate.setKeySerializer(new StringRedisSerializer());
+//        redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+//        return redisTemplate;
+//    }
     @Bean
-    public RedisTemplate<String, Object> redisTemplate() {
-        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
-        redisTemplate.setConnectionFactory(redisConnectionFactory());
-        redisTemplate.setKeySerializer(new StringRedisSerializer());
-        redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
-        return redisTemplate;
+    public RedisTemplate<String, Object> redisTemplate(LettuceConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        return template;
     }
 }
