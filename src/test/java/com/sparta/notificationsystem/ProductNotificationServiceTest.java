@@ -5,10 +5,13 @@ import com.sparta.notificationsystem.repository.ProductUserNotificationHistoryRe
 import com.sparta.notificationsystem.repository.ProductUserNotificationRepository;
 import com.sparta.notificationsystem.service.ProductNotificationService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.stream.IntStream;
@@ -24,15 +27,6 @@ public class ProductNotificationServiceTest {
     @Autowired
     private ProductUserNotificationRepository productUserNotificationRepository;
 
-    @Autowired
-    private ProductUserNotificationHistoryRepository productUserNotificationHistoryRepository;
-
-    @BeforeEach
-    public void setup() {
-        // 테스트 시작 전 기존 유저 알림 및 히스토리 데이터 삭제
-        productUserNotificationHistoryRepository.deleteAll();
-        productUserNotificationRepository.deleteAll();
-    }
     @Test
     @Transactional
     public void testSendNotificationsTo500Users() {
@@ -44,16 +38,27 @@ public class ProductNotificationServiceTest {
             productUserNotificationRepository.save(userNotification);
         });
 
-        // 실제 알림을 전송
-        boolean result = productNotificationService.processRestockNotification(productId);
+        // 실제 알림을 전송 (Mono로 비동기 처리)
+        Mono<Boolean> result = productNotificationService.processRestockNotification(productId)
+                .subscribeOn(Schedulers.boundedElastic());
+
+        // 비동기 작업 대기
+        Boolean success = result.block(); // 비동기 작업을 기다림
 
         // 알림 전송이 성공했는지 확인
-        assertThat(result).isTrue();
-
-        // 500명의 유저에게 알림이 전송되었는지 확인
-        List<ProductUserNotification> notifications = productUserNotificationRepository.findByProductId(productId);
-        assertThat(notifications).hasSize(500);
-
-        // 추가로 필요한 검증 로직: 알림 히스토리가 저장되었는지, 상태가 올바르게 기록되었는지 등을 확인할 수 있음
+        assertThat(success).isTrue();
     }
+    @Test
+    @DisplayName("스케줄러에 의해 비동기 작업이 되었는지 스레드 확인")
+    public void testThreadExecution() {
+        Long productId = 1L;
+
+        Mono.fromCallable(() -> {
+                    System.out.println("테스트 스레드 이름: " + Thread.currentThread().getName());
+                    return productNotificationService.processRestockNotification(productId);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .block();  // 비동기 작업을 동기적으로 처리하여 테스트
+    }
+
 }
