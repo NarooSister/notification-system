@@ -1,10 +1,7 @@
-package com.sparta.notificationsystem;
+package com.sparta.notificationsystem.service;
 
 import com.sparta.notificationsystem.entity.ProductUserNotification;
-import com.sparta.notificationsystem.repository.ProductUserNotificationHistoryRepository;
 import com.sparta.notificationsystem.repository.ProductUserNotificationRepository;
-import com.sparta.notificationsystem.service.ProductNotificationService;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,13 +10,12 @@ import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-public class ProductNotificationServiceTest {
+public class ServiceIntegrationTest {
 
     @Autowired
     private ProductNotificationService productNotificationService;
