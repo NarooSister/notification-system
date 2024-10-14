@@ -1,4 +1,4 @@
-package com.sparta.notificationsystem.exception;
+package com.sparta.notificationsystem.global.exception;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

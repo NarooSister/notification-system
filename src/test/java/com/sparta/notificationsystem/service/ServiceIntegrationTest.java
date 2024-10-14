@@ -1,7 +1,8 @@
 package com.sparta.notificationsystem.service;
 
-import com.sparta.notificationsystem.entity.ProductUserNotification;
-import com.sparta.notificationsystem.repository.ProductUserNotificationRepository;
+import com.sparta.notificationsystem.notification.productusernotification.entity.ProductUserNotification;
+import com.sparta.notificationsystem.notification.productnotification.repository.ProductUserNotificationRepository;
+import com.sparta.notificationsystem.notification.productnotification.service.ProductNotificationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

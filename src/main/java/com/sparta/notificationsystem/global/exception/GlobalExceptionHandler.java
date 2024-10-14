@@ -1,4 +1,4 @@
-package com.sparta.notificationsystem.exception;
+package com.sparta.notificationsystem.global.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;

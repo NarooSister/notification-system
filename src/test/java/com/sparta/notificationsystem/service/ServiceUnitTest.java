@@ -1,11 +1,12 @@
 package com.sparta.notificationsystem.service;
 
-import com.sparta.notificationsystem.entity.Product;
-import com.sparta.notificationsystem.entity.ProductUserNotification;
-import com.sparta.notificationsystem.repository.ProductNotificationHistoryRepository;
-import com.sparta.notificationsystem.repository.ProductRepository;
-import com.sparta.notificationsystem.repository.ProductUserNotificationHistoryRepository;
-import com.sparta.notificationsystem.repository.ProductUserNotificationRepository;
+import com.sparta.notificationsystem.product.entity.Product;
+import com.sparta.notificationsystem.notification.productusernotification.entity.ProductUserNotification;
+import com.sparta.notificationsystem.notification.productusernotification.repository.ProductNotificationHistoryRepository;
+import com.sparta.notificationsystem.product.repository.ProductRepository;
+import com.sparta.notificationsystem.notification.productusernotification.repository.ProductUserNotificationHistoryRepository;
+import com.sparta.notificationsystem.notification.productnotification.repository.ProductUserNotificationRepository;
+import com.sparta.notificationsystem.notification.productnotification.service.ProductNotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -195,6 +196,7 @@ public class ServiceUnitTest {
         verify(redisTemplate.opsForValue(), times(1)).get("product:" + productId);
         verify(redisTemplate.opsForValue(), times(3)).get("productStock:" + productId);
     }
+
     @Test
     @DisplayName("Redis 캐시 미스가 발생했을 때 DB에서 데이터를 가져오고 다시 캐시에 저장되는지 테스트")
     void process_RedisCacheMiss_FetchFromDBAndCacheIt() {

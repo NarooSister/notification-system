@@ -1,4 +1,4 @@
-package com.sparta.notificationsystem.entity;
+package com.sparta.notificationsystem.product.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
