@@ -114,6 +114,7 @@ public class ServiceUnitTest {
                 .verify();
 
     }
+
     @Test
     @DisplayName("알림 전송 중 재고가 0이 되었을 때 예외 발생 테스트")
     void process_StockBecomesZeroDuringNotification_ThrowsException() {
@@ -146,6 +147,8 @@ public class ServiceUnitTest {
         StepVerifier.create(result)
                 .expectError(IllegalArgumentException.class)  // 예외 발생을 기대
                 .verify();
+
+        verify(valueOperations, times(2)).get("productStock:" + productId);  // 두 번 호출됨을 확인
     }
 
     @Test

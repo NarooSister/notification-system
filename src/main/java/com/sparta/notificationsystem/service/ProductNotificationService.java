@@ -33,6 +33,7 @@ public class ProductNotificationService {
     private final ProductNotificationHistoryRepository productNotificationHistoryRepository;
     private final RedisTemplate<String, Object> redisTemplate;
 
+
     // 알림 프로세스
     @Transactional
     public Mono<Boolean> processRestockNotification(Long productId) {
@@ -51,10 +52,14 @@ public class ProductNotificationService {
                     // 재입고 알림 History 저장
                     ProductNotificationHistory notificationHistory = saveNotificationHistory(product);
                     // 유저에게 알림 보내기
-                    sendNotificationToUsers(productId, notifications, product, notificationHistory, stock);
-                    return true;    // 재입고 알림 프로세스 성공
-                })
-
+                    return new Object[] {productId, notifications, product, notificationHistory, stock};
+                }) .flatMap(data -> sendNotificationToUsers(
+                        (Long) data[0],
+                        (List<ProductUserNotification>) data[1],
+                        (Product) data[2],
+                        (ProductNotificationHistory) data[3],
+                        (Integer) data[4]
+                ))
                 // JPA의 블로킹 작업을 Scheduler를 사용하여 별도의 스레드에서 처리
                 .subscribeOn(Schedulers.boundedElastic());  // 블로킹 작업을 위한 스레드 풀에서 실행
     }
@@ -65,7 +70,7 @@ public class ProductNotificationService {
             log.info("Product 캐시 미스:" + productId);
             product = productRepository.findById(productId)
                     .orElseThrow(() -> new NoSuchElementException("상품을 찾을 수 없습니다."));
-            redisTemplate.opsForValue().set("product:" + productId, product);
+            updateCache("product:" + productId, product);
         } else {
             log.info("Product 캐시 히트:" + productId);
         }
@@ -77,7 +82,7 @@ public class ProductNotificationService {
         Integer stock = (Integer) redisTemplate.opsForValue().get("productStock:" + product.getId());
         if (stock == null) {
             stock = product.getStock();
-            redisTemplate.opsForValue().set("productStock:" + product.getId(), stock);
+            updateCache("productStock:" + product.getId(), stock);
         }
         return stock;
     }
@@ -95,7 +100,7 @@ public class ProductNotificationService {
         if (notifications == null) {
             // 캐시에 없으면 DB에서 조회 후 캐시에 저장
             notifications = productUserNotificationRepository.findByProductId(productId);
-            redisTemplate.opsForValue().set("productNotifications:" + productId, notifications);
+            updateCache("productNotifications:" + productId, notifications);
         }
         // 예외 발생 처리 메서드 호출
         validateNotificationsExist(notifications);
@@ -114,7 +119,7 @@ public class ProductNotificationService {
         product.incrementRestockRound();
         productRepository.save(product);
         // Redis 캐시를 갱신 (Product 정보 업데이트)
-        redisTemplate.opsForValue().set("product:" + product.getId(), product);
+        updateCache("product:" + product.getId(), product);
     }
 
     private ProductNotificationHistory saveNotificationHistory(Product product) {
@@ -124,28 +129,32 @@ public class ProductNotificationService {
         return notificationHistory;
     }
 
-    private void sendNotificationToUsers(Long productId, List<ProductUserNotification> notifications, Product product, ProductNotificationHistory notificationHistory, Integer stock) {
-        String message = "재입고 알림 - 상품명 [" + product.getName() + "]";
-        sendNotification(message);
-
-        // 유저들에게 메시지 전송 및 히스토리 기록
-        for (ProductUserNotification notification : notifications) {
-            stock = (Integer) redisTemplate.opsForValue().get("productStock:" + productId);
-            if (stock <= 0) {
-                // 상태를 "CANCELED_BY_SOLD_OUT"으로 설정하고 중단
-                notificationHistory.markCanceledBySoldOut();
-                productNotificationHistoryRepository.save(notificationHistory);
-                throw new IllegalArgumentException("재고가 0이 되어 알림 전송을 중단하였습니다.");
-            }
-
-            // 히스토리 저장 (JPA 블로킹 작업)
+    private Mono<Boolean> sendNotificationToUsers(Long productId, List<ProductUserNotification> notifications, Product product, ProductNotificationHistory notificationHistory, Integer stock) {
+        return Flux.fromIterable(notifications)
+                .concatMap(notification -> {
+                    Integer currentStock = getStockFromCacheOrProduct(product);
+                    if (currentStock <= 0) {
+                        // 예외를 던져서 프로세스를 중단
+                        return Mono.error(new IllegalArgumentException("재고가 0이 되어 알림 전송을 중단하였습니다."));
+                    }
+                    // 알림 전송 및 히스토리 저장
+                    return saveUserNotificationHistory(productId, notification, product, notificationHistory);
+                })
+                .then(Mono.just(true))  // 모든 알림 전송이 완료되면 true 반환
+                .onErrorResume(e -> {
+                    log.error("알림 전송 중 예외 발생: ", e);
+                    return Mono.error(e);  // 예외를 전파하여 처리 중단
+                });
+    }
+    private Mono<Void> saveUserNotificationHistory(Long productId, ProductUserNotification notification, Product product, ProductNotificationHistory notificationHistory) {
+        // 히스토리 저장 로직
+        return Mono.fromRunnable(() -> {
             ProductUserNotificationHistory userHistory = new ProductUserNotificationHistory(productId, product.getTotalRestockRound(), notification.getUserId());
             productUserNotificationHistoryRepository.save(userHistory);
-        }
-
-        // 알림 전송 완료 후 상태를 "COMPLETED"로 설정
-        notificationHistory.markCompleted();
-        productNotificationHistoryRepository.save(notificationHistory);
+        });
+    }
+    private void updateCache(String key, Object value) {
+        redisTemplate.opsForValue().set(key, value);
     }
 
     // 알림을 전송하는 메서드
