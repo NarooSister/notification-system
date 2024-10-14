@@ -8,6 +8,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -21,6 +24,8 @@ public class ProductUserNotificationHistory {
     private Long productId; // 알림 발송 상품
     private Integer restockRound;   // 이번 알림의 재입고 회차
     private Long userId;    // 알림을 받은 유저
+    @CreationTimestamp
+    private LocalDateTime createdAt;    // 발송 날짜
 
     public ProductUserNotificationHistory(Long productId, Integer restockRound, Long userId) {
         this.productId = productId;

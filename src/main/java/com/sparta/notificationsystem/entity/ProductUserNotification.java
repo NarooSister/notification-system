@@ -7,6 +7,10 @@ import jakarta.persistence.Id;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -18,6 +22,10 @@ public class ProductUserNotification {
     private Long id;
     private Long productId; // 알림 설정한 상품
     private Long userId;    // 알림 설정한 유저의 아이디
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 
     public ProductUserNotification(Long productId, Long userId) {
         this.productId = productId;

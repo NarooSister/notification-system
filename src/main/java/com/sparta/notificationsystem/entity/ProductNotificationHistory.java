@@ -17,7 +17,7 @@ public class ProductNotificationHistory {
     private Long id;
     private Long productId;
     private Integer restockRound;   // 이번 알림의 재입고 회차
-
+    private Long lastUserId;    // 마지막 발송 유저 아이디 저장
     @Enumerated(EnumType.STRING)
     private Status status;
 

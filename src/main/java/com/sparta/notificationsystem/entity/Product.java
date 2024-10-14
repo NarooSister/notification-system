@@ -22,4 +22,10 @@ public class Product {
     public void incrementRestockRound() {
         this.totalRestockRound++;
     }
+
+    public Product(Integer totalRestockRound, String name, Integer stock) {
+        this.totalRestockRound = totalRestockRound;
+        this.name = name;
+        this.stock = stock;
+    }
 }
