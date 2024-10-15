@@ -37,197 +37,217 @@ public class ProductNotificationService {
     // 알림 프로세스
     @Transactional
     public Mono<Boolean> processRestockNotification(Long productId) {
-        return Mono.fromCallable(() -> {
-                    // Redis 또는 DB에서 Product, stock 상태 확인
-                    Product product = getProductFromCacheOrDB(productId);
-                    Integer stock = getStockFromCacheOrProduct(product);
+        return fetchProductAndStock(productId)        // 1. Product 및 stock 상태 확인
+                .flatMap(this::notifyUsersAndHandleStock)  // 2. 알림 전송 및 재고 상태 처리
+                .subscribeOn(Schedulers.boundedElastic())  // 3. 비동기 실행
+                .onErrorResume(throwable -> handleProcessError(productId, throwable));  // 4. 오류 처리
+    }
 
-                    // 재고가 없는 경우 알림 중단하고 예외
-                    validateStockExist(stock);
+    // 수동 알림 프로세스
+    @Transactional
+    public Mono<Boolean> processRestockNotificationManual(Long productId) {
+        return fetchProductAndStock(productId)
+                .flatMap(product -> {
+                    // 이전 알림 목록 확인
+                    ProductNotificationHistory lastNotificationHistory = getLastNotificationHistory();
 
-                    // 최근 알림 상태 확인 후 결정
-                    ProductNotificationHistory lastNotificationHistory = productNotificationHistoryRepository.findTopByOrderByIdDesc()
-                            .orElse(null);
-
-                    // 알림 설정한 유저 목록
-                    List<Long> notificationUserIds;
-
-                    if (lastNotificationHistory != null && (lastNotificationHistory.getStatus() == ProductNotificationHistory.Status.CANCELED_BY_SOLD_OUT ||
-                            lastNotificationHistory.getStatus() == ProductNotificationHistory.Status.CANCELED_BY_ERROR)) {
-                        // 이전 알림이 품절 또는 오류로 중단되었으면 마지막 유저 이후의 목록 가져오기
-                        notificationUserIds = getRemainingNotificationsFromCacheOrDB(productId, lastNotificationHistory.getLastUserId());
-                    } else {
-                        // 새로 모든 유저에게 알림 보내기
-                        notificationUserIds = getNotificationsFromCacheOrDB(productId);
-                        // 재입고 회차 증가
-                        incrementRestockRound(product);
+                    // 취소된 알림이 있는지 확인하고 없으면 예외 발생
+                    if (lastNotificationHistory == null || !isLastNotificationFailed(lastNotificationHistory)) {
+                        return Mono.error(new NoSuchElementException("에러나 품절로 인해 취소된 알림이 없습니다."));
                     }
 
-                    // 재입고 알림 History 저장
-                    ProductNotificationHistory notificationHistory = saveNotificationHistory(product);
+                    // 취소된 알림이 있으면, 취소된 알림 이후의 유저에게만 알림 전송
+                    List<Long> notificationUserIds = getRemainingNotificationsFromCacheOrDB(productId, lastNotificationHistory.getLastUserId());
 
-                    // 유저에게 알림 보내기
-                    return new NotificationContext(product, notificationUserIds, notificationHistory);
-
+                    return sendNotificationAndSaveHistory(product, notificationUserIds);
                 })
-                .flatMap(context -> sendNotificationToUsers(context))
-                // JPA의 블로킹 작업을 Scheduler를 사용하여 별도의 스레드에서 처리
-                .subscribeOn(Schedulers.boundedElastic()) // 블로킹 작업을 위한 스레드 풀에서 실행
-                .onErrorResume(throwable -> {
-                    // 전체 프로세스에서 발생하는 예외 처리
-                    log.error("재입고 알림 프로세스 중 오류 발생: ", throwable);
-                    ProductNotificationHistory lastNotificationHistory = productNotificationHistoryRepository.findTopByOrderByIdDesc().orElse(null);
-                    ProductNotificationHistory notificationHistory = new ProductNotificationHistory(
-                            productId,
-                            lastNotificationHistory != null ? lastNotificationHistory.getRestockRound() : 1,
-                            ProductNotificationHistory.Status.CANCELED_BY_ERROR);
-                    notificationHistory.setLastUserId(lastNotificationHistory != null ? lastNotificationHistory.getLastUserId() : 0L);
-                    productNotificationHistoryRepository.save(notificationHistory);
-                    return Mono.error(throwable);
-                });
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(throwable -> handleProcessError(productId, throwable));
     }
-
-    private List<Long> getRemainingNotificationsFromCacheOrDB(Long productId, Long lastUserId) {
-        // Redis에서 ProductUserNotification 캐시 조회 후 마지막 유저 이후의 목록 필터링
-        String userIdsStr = (String) redisTemplate.opsForValue().get("productNotificationUserIds:" + productId);
-        List<Long> userIds;
-        if (userIdsStr == null) {
-            // 캐시에 없으면 DB에서 조회 후 캐시에 저장
-            userIds = productUserNotificationRepository.findByProductIdAndUserIdGreaterThan(productId, lastUserId)
-                    .stream().map(ProductUserNotification::getUserId).toList();
-            updateCache("productNotificationUserIds:" + productId, String.join(",", userIds.stream().map(String::valueOf).toList()));
-        } else {
-            userIds = Arrays.stream(userIdsStr.split(","))
-                    .map(Long::parseLong)
-                    .filter(userId -> userId > lastUserId)
-                    .toList();
-        }
-        // 예외 발생 처리 메서드 호출
-        validateNotificationUserIdsExist(userIds);
-        return userIds;
+    private Mono<Product> fetchProductAndStock(Long productId) {
+        return Mono.fromCallable(() -> {
+            Product product = getProductFromCacheOrDB(productId);  // Product 가져오기
+            ensureStockIsAvailable(getStockFromCacheOrProduct(product));  // 재고 유효성 검사
+            return product;
+        });
     }
-
     private Product getProductFromCacheOrDB(Long productId) {
-        Product product = (Product) redisTemplate.opsForValue().get("product:" + productId);
-        if (product == null) {
-            product = productRepository.findById(productId)
-                    .orElseThrow(() -> new NoSuchElementException("상품을 찾을 수 없습니다."));
-            updateCache("product:" + productId, product);
-        }
-        return product;
+        return redisTemplate.opsForValue().get("product:" + productId) != null
+                ? (Product) redisTemplate.opsForValue().get("product:" + productId)
+                : productRepository.findById(productId).orElseThrow(() -> new NoSuchElementException("상품을 찾을 수 없습니다."));
     }
-
-    private Integer getStockFromCacheOrProduct(Product product) {
-        // 재고 상태 확인 (Redis에서 먼저 조회)
-        Integer stock = (Integer) redisTemplate.opsForValue().get("productStock:" + product.getId());
-        if (stock == null) {
-            stock = product.getStock();
-            updateCache("productStock:" + product.getId(), stock);
-        }
-        return stock;
-    }
-
-    private void validateStockExist(Integer stock) {
-        // 재고가 없는 경우 알림 전송 중단
+    private void ensureStockIsAvailable(Integer stock) {
         if (stock <= 0) {
             throw new NoSuchElementException("재고가 없습니다. 알림을 전송할 수 없습니다.");
         }
     }
-
-    private List<Long> getNotificationsFromCacheOrDB(Long productId) {
-        // Redis에서 ProductUserNotification 캐시 조회
-        String userIdsStr = (String) redisTemplate.opsForValue().get("productNotificationUserIds:" + productId);
-        List<Long> userIds;
-        if (userIdsStr == null) {
-            // 캐시에 없으면 DB에서 조회 후 캐시에 저장
-            userIds = productUserNotificationRepository.findByProductId(productId)
-                    .stream().map(ProductUserNotification::getUserId).toList();
-            updateCache("productNotificationUserIds:" + productId, String.join(",", userIds.stream().map(String::valueOf).toList()));
-        }  else {
-            userIds = Arrays.stream(userIdsStr.split(",")).map(Long::parseLong).toList();
-        }
-        // 예외 발생 처리 메서드 호출
-        validateNotificationUserIdsExist(userIds);
-        return userIds;
+    private Integer getStockFromCacheOrProduct(Product product) {
+        Integer stock = (Integer) redisTemplate.opsForValue().get("productStock:" + product.getId());
+        return stock != null ? stock : product.getStock();
     }
-    // 알림 설정 유저가 없는 경우에 예외 발생
-    private void validateNotificationUserIdsExist(List<Long> userIds) {
-        if (userIds.isEmpty()) {
-            throw new NoSuchElementException("알림을 설정한 유저가 없습니다.");
-        }
+
+    private Mono<Boolean> notifyUsersAndHandleStock(Product product) {
+        List<Long> notificationUserIds = getNotificationsFromCacheOrDB(product.getId());  // 알림 받을 유저 목록 조회
+        incrementRestockRound(product);  // 재입고 회차 증가
+        ProductNotificationHistory notificationHistory = createInProgressNotificationHistory(product);
+        // 2. 생성된 알림 히스토리 저장
+        saveNotificationHistory(notificationHistory);
+        // 3. 알림 전송
+        return sendNotificationToUsers(new NotificationContext(product, notificationUserIds, notificationHistory));  // 알림 전송
     }
 
     private void incrementRestockRound(Product product) {
-        // 상품을 찾고 재입고 회차를 증가시킴
         product.incrementRestockRound();
         productRepository.save(product);
-        // Redis 캐시를 갱신 (Product 정보 업데이트)
         updateCache("product:" + product.getId(), product);
     }
-
-    private ProductNotificationHistory saveNotificationHistory(Product product) {
-        // 재입고 알림 상태를 저장 (IN_PROGRESS)
-        ProductNotificationHistory notificationHistory = new ProductNotificationHistory(product.getId(),
-                product.getTotalRestockRound(), ProductNotificationHistory.Status.IN_PROGRESS);
+    // 저장 메서드
+    private void saveNotificationHistory(ProductNotificationHistory notificationHistory) {
         productNotificationHistoryRepository.save(notificationHistory);
-        return notificationHistory;
     }
-
     private Mono<Boolean> sendNotificationToUsers(NotificationContext context) {
         sendInitialNotification(context);
         return notifyUsers(context)
                 .then(markNotificationCompleted(context))
                 .thenReturn(true);
     }
-
+    // NotificationContext record to group related data for notification process
+    private record NotificationContext(Product product, List<Long> userIds, ProductNotificationHistory notificationHistory) {
+    }
+    private void updateCache(String key, Object value) {
+        redisTemplate.opsForValue().set(key, value);
+    }
     private void sendInitialNotification(NotificationContext context) {
-        String message = "재입고 알림 - 상품명 [" + context.product().getName() + "]";
-        sendNotification(message);
+        sendNotification("재입고 알림 - 상품명 [" + context.product().getName() + "]");
     }
-
-    private Flux<Void> notifyUsers(NotificationContext context) {
+    private Mono<Void> notifyUsers(NotificationContext context) {
         return Flux.fromIterable(context.userIds())
-                .concatMap(userId -> Mono.fromCallable(() -> (Integer) redisTemplate.opsForValue().get("productStock:" + context.product().getId()))
-                        .flatMap(currentStock -> handleStockAndNotifyUser(currentStock, context, userId)));
+                .concatMap(userId -> getStockAndNotifyUser(context, userId))
+                .then();
     }
-
-    private Mono<Void> handleStockAndNotifyUser(Integer currentStock, NotificationContext context, Long userId) {
-        if (currentStock == null || currentStock <= 0) {
-            // 재고가 0이면 예외 발생, 전체 알림 프로세스 종료
-            if (context.notificationHistory() != null) {
-                context.notificationHistory().markCanceledBySoldOut();
-                productNotificationHistoryRepository.save(context.notificationHistory());
-            }
-            return Mono.error(new IllegalArgumentException("재고가 0이 되어 알림 전송을 중단하였습니다."));
-        }
-        // 유저별 알림 히스토리 저장
-        ProductUserNotificationHistory userHistory = new ProductUserNotificationHistory(context.product().getId(), context.notificationHistory().getRestockRound(), userId);
-        productUserNotificationHistoryRepository.save(userHistory);
-        context.notificationHistory().setLastUserId(userId);
-        productUserNotificationHistoryRepository.save(userHistory);
-        return Mono.empty();
-    }
-
     private Mono<Void> markNotificationCompleted(NotificationContext context) {
         return Mono.fromRunnable(() -> {
-            // 알림 전송 완료 후 상태를 "COMPLETED"로 설정
             if (context.notificationHistory() != null) {
                 context.notificationHistory().markCompleted();
                 productNotificationHistoryRepository.save(context.notificationHistory());
             }
         });
     }
-
-    private void updateCache(String key, Object value) {
-        redisTemplate.opsForValue().set(key, value);
+    private Mono<Void> getStockAndNotifyUser(NotificationContext context, Long userId) {
+        return Mono.fromCallable(() -> getStockFromCache(context.product().getId()))
+                .flatMap(stock -> handleStockAndNotifyUser(stock, context, userId));
+    }
+    private Integer getStockFromCache(Long productId) {
+        return (Integer) redisTemplate.opsForValue().get("productStock:" + productId);
+    }
+    private Mono<Void> handleStockAndNotifyUser(Integer stock, NotificationContext context, Long userId) {
+        if (stock == null || stock <= 0) {
+            return handleStockDepleted(context);
+        }
+        return saveUserNotificationHistory(context, userId);
+    }
+    private Mono<Void> handleStockDepleted(NotificationContext context) {
+        if (context.notificationHistory() != null) {
+            context.notificationHistory().markCanceledBySoldOut();
+            productNotificationHistoryRepository.save(context.notificationHistory());
+        }
+        return Mono.error(new IllegalArgumentException("재고가 0이 되어 알림 전송을 중단하였습니다."));
+    }
+    private Mono<Void> saveUserNotificationHistory(NotificationContext context, Long userId) {
+        ProductUserNotificationHistory userHistory = new ProductUserNotificationHistory(context.product().getId(), context.notificationHistory().getRestockRound(), userId);
+        productUserNotificationHistoryRepository.save(userHistory);
+        context.notificationHistory().setLastUserId(userId);
+        return Mono.empty();
     }
 
-    // 알림을 전송하는 메서드
-    public void sendNotification(String message) {
-        // SSE를 통해 알림을 비동기적으로 전송
+    private void sendNotification(String message) {
         sink.tryEmitNext(message);
         log.info("알림을 보냈습니다: " + message);
     }
 
-    private record NotificationContext(Product product, List<Long> userIds, ProductNotificationHistory notificationHistory) {}
+    private Mono<Boolean> handleProcessError(Long productId, Throwable throwable) {
+        log.error("재입고 알림 프로세스 중 오류 발생: ", throwable);
+        ProductNotificationHistory lastNotificationHistory = getLastNotificationHistory();  // 마지막 알림 히스토리 가져오기
+        saveNotificationHistoryError(productId, lastNotificationHistory);  // 오류 상태 저장
+        return Mono.error(throwable);
+    }
+    private void saveNotificationHistoryError(Long productId, ProductNotificationHistory lastNotificationHistory) {
+        Integer restockRound = (lastNotificationHistory != null) ? lastNotificationHistory.getRestockRound() : 1;
+        Long lastUserId = (lastNotificationHistory != null && lastNotificationHistory.getLastUserId() != null)
+                ? lastNotificationHistory.getLastUserId()
+                : 0L;
+
+        ProductNotificationHistory notificationHistory = new ProductNotificationHistory(
+                productId,
+                restockRound,
+                ProductNotificationHistory.Status.CANCELED_BY_ERROR
+        );
+
+        notificationHistory.setLastUserId(lastUserId);
+        productNotificationHistoryRepository.save(notificationHistory);
+    }
+    private ProductNotificationHistory getLastNotificationHistory() {
+        return productNotificationHistoryRepository.findTopByOrderByIdDesc().orElse(null);
+    }
+
+    private boolean isLastNotificationFailed(ProductNotificationHistory history) {
+        return history.getStatus() == ProductNotificationHistory.Status.CANCELED_BY_SOLD_OUT ||
+                history.getStatus() == ProductNotificationHistory.Status.CANCELED_BY_ERROR;
+    }
+
+    private List<Long> getRemainingNotificationsFromCacheOrDB(Long productId, Long lastUserId) {
+        String cacheKey = "productNotificationUserIds:" + productId;
+        String userIdsStr = (String) redisTemplate.opsForValue().get(cacheKey);
+        List<Long> userIds = (userIdsStr != null)
+                ? parseUserIds(userIdsStr)
+                : fetchAndCacheUserIdsFromDB(productId, cacheKey);
+        return userIds.stream()
+                .filter(userId -> userId > lastUserId)
+                .toList();
+    }
+    private List<Long> parseUserIds(String userIdsStr) {
+        return List.of(userIdsStr.split(",")).stream().map(Long::parseLong).toList();
+    }
+    private List<Long> fetchAndCacheUserIdsFromDB(Long productId, String cacheKey) {
+        List<Long> userIds = productUserNotificationRepository.findByProductId(productId)
+                .stream()
+                .map(ProductUserNotification::getUserId)
+                .toList();
+        if (!userIds.isEmpty()) {
+            String userIdsStr = String.join(",", userIds.stream().map(String::valueOf).toArray(String[]::new));
+            updateCache(cacheKey, userIdsStr);
+        }
+        return userIds;
+    }
+    private List<Long> getNotificationsFromCacheOrDB(Long productId) {
+        String cacheKey = "productNotificationUserIds:" + productId;
+        String userIdsStr = (String) redisTemplate.opsForValue().get(cacheKey);
+        List<Long> userIds = (userIdsStr != null)
+                ? parseUserIds(userIdsStr)
+                : fetchAndCacheUserIdsFromDB(productId, cacheKey);
+        validateNotificationUserIdsExist(userIds);
+        return userIds;
+    }
+
+
+    private void validateNotificationUserIdsExist(List<Long> userIds) {
+        if (userIds.isEmpty()) {
+            throw new NoSuchElementException("알림을 설정한 유저가 없습니다.");
+        }
+    }
+
+    private Mono<Boolean> sendNotificationAndSaveHistory(Product product, List<Long> notificationUserIds) {
+        incrementRestockRound(product);
+        ProductNotificationHistory notificationHistory = createInProgressNotificationHistory(product);
+        return sendNotificationToUsers(new NotificationContext(product, notificationUserIds, notificationHistory));
+    }
+    private ProductNotificationHistory createInProgressNotificationHistory(Product product) {
+        // Product 정보로부터 ProductNotificationHistory 객체 생성
+        ProductNotificationHistory notificationHistory = new ProductNotificationHistory(
+                product.getId(),
+                product.getTotalRestockRound(),
+                ProductNotificationHistory.Status.IN_PROGRESS  // 상태는 IN_PROGRESS로 설정
+        );
+        return notificationHistory;
+    }
 }
