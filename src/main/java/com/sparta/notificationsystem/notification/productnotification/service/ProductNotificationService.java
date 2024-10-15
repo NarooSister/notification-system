@@ -131,11 +131,13 @@ public class ProductNotificationService {
     private Mono<Boolean> sendNotificationToUsers(NotificationContext context) {
         sendInitialNotification(context);
         return notifyUsers(context)
-                .then(markNotificationCompleted(context))
+                .last()  // 마지막 유저 처리 후
+                .flatMap(lastUserId -> markNotificationCompleted(context, lastUserId))  // 마지막 유저 ID 전달
                 .thenReturn(true);
     }
     // 1. 알림 보내는 문장
     private void sendInitialNotification(NotificationContext context) {
+        log.info("알림 전송 시 상품 이름: " + context.product().getName());
         sendNotification("재입고 알림 - 상품명 [" + context.product().getName() + "]");
     }
 
@@ -146,15 +148,16 @@ public class ProductNotificationService {
     }
 
     // 3. 유저에게 개별 알림 처리
-    private Mono<Void> notifyUsers(NotificationContext context) {
-        return Flux.fromIterable(context.userIds())
-                .concatMap(userId -> getStockAndNotifyUser(context, userId))
-                .then();
+    private Flux<Long> notifyUsers(NotificationContext context) {
+        return Flux.fromIterable(context.userIds())  // 유저 목록
+                .concatMap(userId -> getStockAndNotifyUser(context, userId)  // 유저 알림 처리
+                        .thenReturn(userId));  // 유저 ID 반환
     }
     // 4. 알림 완료 상태 갱신 및 저장
-    private Mono<Void> markNotificationCompleted(NotificationContext context) {
+    private Mono<Void> markNotificationCompleted(NotificationContext context, Long lastUserId) {
         return Mono.fromRunnable(() -> {
             if (context.notificationHistory() != null) {
+                context.notificationHistory().setLastUserId(lastUserId);
                 context.notificationHistory().markCompleted();
                 productNotificationHistoryRepository.save(context.notificationHistory());
             }
@@ -225,8 +228,11 @@ public class ProductNotificationService {
         ProductNotificationHistory notificationHistory = new ProductNotificationHistory(
                 productId,
                 restockRound,
+                lastUserId,
                 ProductNotificationHistory.Status.CANCELED_BY_ERROR
         );
+
+
 
         notificationHistory.setLastUserId(lastUserId);
         productNotificationHistoryRepository.save(notificationHistory);

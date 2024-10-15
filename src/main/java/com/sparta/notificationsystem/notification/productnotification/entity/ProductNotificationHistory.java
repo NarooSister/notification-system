@@ -38,6 +38,13 @@ public class ProductNotificationHistory {
         }
     }
 
+    public ProductNotificationHistory(Long productId, Integer restockRound,  Long lastUserId, Status status) {
+        this.productId = productId;
+        this.restockRound = restockRound;
+        this.lastUserId = lastUserId;
+        this.status = status;
+    }
+
     public ProductNotificationHistory(Long productId, Integer restockRound, Status status) {
         this.productId = productId;
         this.restockRound = restockRound;
