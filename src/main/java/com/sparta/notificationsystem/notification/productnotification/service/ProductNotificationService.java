@@ -216,7 +216,7 @@ public class ProductNotificationService {
         productUserNotificationHistoryRepository.save(userHistory);
         context.notificationHistory().setLastUserId(userId);
         return Mono.empty();
-    }d
+    }
 
     // 마지막 알림 히스토리를 가져온다.
     private ProductNotificationHistory getLastNotificationHistory() {
