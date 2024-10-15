@@ -190,10 +190,9 @@ public class ServiceUnitTest {
                 .expectNext(true)  // 알림이 성공적으로 전송되었을 때 true를 반환하는지 확인
                 .verifyComplete();
 
-        // Verify that save method was called for product increment and user notifications
         verify(productRepository, times(1)).save(product);  // 재입고 회차 증가를 위해 save 호출 확인
         verify(productUserNotificationRepository, times(1)).findByProductId(productId);
-        verify(redisTemplate.opsForValue(), times(1)).get("product:" + productId);
+        verify(redisTemplate.opsForValue(), times(2)).get("product:" + productId);
         verify(redisTemplate.opsForValue(), times(3)).get("productStock:" + productId);
     }
 

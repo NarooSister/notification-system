@@ -1,5 +1,6 @@
 package com.sparta.notificationsystem.global.exception;
 
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -62,5 +63,16 @@ public class GlobalExceptionHandler {
         );
         return new ResponseEntity<>(restApiException, HttpStatus.CONFLICT);
     }
+    @ExceptionHandler(RequestNotPermitted.class)
+    public ResponseEntity<RestApiException> handleRateLimitException(HttpServletRequest request) {
+        RestApiException restApiException = new RestApiException(
+                LocalDateTime.now(),
+                HttpStatus.TOO_MANY_REQUESTS.value(),
+                "Rate limit가 초과되었습니다. 나중에 다시 시도해 주세요.",
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(restApiException, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
 
 }
