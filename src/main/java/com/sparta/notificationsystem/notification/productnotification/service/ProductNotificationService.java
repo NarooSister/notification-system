@@ -91,8 +91,16 @@ public class ProductNotificationService {
     // 3. redis에서 저장된 재고 수량을 가져옴
     private Integer getStockFromCacheOrProduct(Product product) {
         Integer stock = (Integer) redisTemplate.opsForValue().get("productStock:" + product.getId());
-        return stock != null ? stock : product.getStock();
+
+        if (stock == null) {
+            // 캐시에 재고가 없으면 DB에서 조회하고 Redis에 저장
+            stock = product.getStock();
+            redisTemplate.opsForValue().set("productStock:" + product.getId(), stock);
+        }
+
+        return stock;
     }
+
 
     // [상품 재입고 알림 전송, 회차 증가, 저장 프로세스]
     private Mono<Boolean> notifyUsersAndHandleStock(Product product) {
@@ -137,7 +145,6 @@ public class ProductNotificationService {
     }
     // 1. 알림 보내는 문장
     private void sendInitialNotification(NotificationContext context) {
-        log.info("알림 전송 시 상품 이름: " + context.product().getName());
         sendNotification("재입고 알림 - 상품명 [" + context.product().getName() + "]");
     }
 
@@ -149,10 +156,14 @@ public class ProductNotificationService {
 
     // 3. 유저에게 개별 알림 처리
     private Flux<Long> notifyUsers(NotificationContext context) {
-        return Flux.fromIterable(context.userIds())  // 유저 목록
-                .concatMap(userId -> getStockAndNotifyUser(context, userId)  // 유저 알림 처리
-                        .thenReturn(userId));  // 유저 ID 반환
+        return Flux.fromIterable(context.userIds())
+                .concatMap(userId -> getStockAndNotifyUser(context, userId)
+                        .flatMap(unused -> saveUserNotificationHistory(context, userId))  // JPA 저장이 완료될 때까지 기다림
+                        .thenReturn(userId)  // 유저 ID 반환
+                );
     }
+
+
     // 4. 알림 완료 상태 갱신 및 저장
     private Mono<Void> markNotificationCompleted(NotificationContext context, Long lastUserId) {
         return Mono.fromRunnable(() -> {
@@ -183,10 +194,12 @@ public class ProductNotificationService {
     // 재고를 처리하고 알림을 전송한다.
     private Mono<Void> handleStockAndNotifyUser(Integer stock, NotificationContext context, Long userId) {
         if (stock == null || stock <= 0) {
-            return handleStockDepleted(context);
+            return handleStockDepleted(context);  // 재고가 0이거나 없으면 품절 처리
         }
-        return saveUserNotificationHistory(context, userId);
+        // 재고가 있을 때
+        return saveUserNotificationHistory(context, userId);  // 재고가 있을 때 알림 히스토리 저장
     }
+
 
     // 재고가 없는 경우 품절 처리를 하고 저장한 뒤 에러를 던진다.
     private Mono<Void> handleStockDepleted(NotificationContext context) {
@@ -203,7 +216,7 @@ public class ProductNotificationService {
         productUserNotificationHistoryRepository.save(userHistory);
         context.notificationHistory().setLastUserId(userId);
         return Mono.empty();
-    }
+    }d
 
     // 마지막 알림 히스토리를 가져온다.
     private ProductNotificationHistory getLastNotificationHistory() {
@@ -231,8 +244,6 @@ public class ProductNotificationService {
                 lastUserId,
                 ProductNotificationHistory.Status.CANCELED_BY_ERROR
         );
-
-
 
         notificationHistory.setLastUserId(lastUserId);
         productNotificationHistoryRepository.save(notificationHistory);
